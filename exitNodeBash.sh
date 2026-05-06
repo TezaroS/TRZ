@@ -1,66 +1,63 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ------------------------------------------------------------------
-#  CONFIGURATION (you can tweak these if you wish)
-# ------------------------------------------------------------------
-IP="82.115.19.57"                     # your VPS IP – change only if you move hosts
-WORKDIR="/opt/exit-node"              # where the script will store files
-EXIT_NODE_URL=(
-    "https://raw.githubusercontent.com/"
-    "therealaleph/MasterHttpRelayVPN-RUST/main/src/exit_node.ts"
-)                                     # URL to the raw source file
+# -------------------------------------------------------------
+#  CONFIGURATION – tweak only if you move the VPS or want a new IP
+# -------------------------------------------------------------
+IP="82.115.19.57"                         # <-- your public IP
+WORKDIR="/opt/exit-node"                  # where we keep all files
+EXIT_NODE_URL="https://raw.githubusercontent.com/therealaleph/MasterHttpRelayVPN-RUST/main/src/exit_node.ts"
 
-# ------------------------------------------------------------------
-#  1️⃣  Ask for or generate a PSK (pre‑shared key)
-# ------------------------------------------------------------------
-PSK_INPUT=${1:-}
-if [[ -z "$PSK_INPUT" ]]; then
-  read -rp "Enter your PSK (leave blank → random hex): " PSK_INPUT
+# -------------------------------------------------------------
+#  1️⃣  Ask for a PSK or generate one automatically
+# -------------------------------------------------------------
+PSK=${1:-}
+if [[ -z "$PSK" ]]; then
+    read -rp "Enter your pre‑shared key (leave blank → random): " PSK
 fi
 
-if [[ -z "$PSK_INPUT" ]]; then
-    echo "🔑 Generating a random 32‑byte secret for you..."
+if [[ -z "$PSK" ]]; then
+    echo "🔑 Generating 32‑byte secret …"
     PSK=$(openssl rand -hex 32)
 else
-    PSK="$PSK_INPUT"
+    # keep exactly what the user typed
+    PSK="$PSK"
 fi
-export PSK   # make it available to the service later
+export PSK   # make it visible to systemd later
 
-# ------------------------------------------------------------------
-#  2️⃣  Install Deno if missing
-# ------------------------------------------------------------------
+# -------------------------------------------------------------
+#  2️⃣  Install Deno if not already present
+# -------------------------------------------------------------
 if ! command -v deno >/dev/null 2>&1; then
-  echo "🛠️ Installing Deno ..."
-  curl -fsSL https://deno.land/x/install/install.sh | sh
-  export PATH="$HOME/.deno/bin:$PATH"
+    echo "🛠️ Installing Deno ..."
+    curl -fsSL https://deno.land/x/install/install.sh | sh
+    export PATH="$HOME/.deno/bin:$PATH"
 fi
 
-# ------------------------------------------------------------------
-#  3️⃣  Prepare working directory & download the handler
-# ------------------------------------------------------------------
-mkdir -p "$WORKDIR"
-cd "$WORKDIR"
+# -------------------------------------------------------------
+#  3️⃣  Prepare the working directory & pull the handler file
+# -------------------------------------------------------------
+mkdir -p "$WORKDIR" && cd "$WORKDIR"
 
 echo "📥 Downloading exit_node.ts ..."
-curl -fsSL "${EXIT_NODE_URL[*]}" > exit_node.ts.tmp
+curl -fsSL "$EXIT_NODE_URL" > exit_node.ts.tmp
 
-echo "🔧 Replacing PSK placeholder ..."
+echo "🔧 Replacing the PSK placeholder …"
 sed "s|const PSK = \"CHANGE_ME_TO_A_STRONG_SECRET\";|const PSK = \"$PSK\";|" \
     exit_node.ts.tmp > exit_node.ts
 rm -f exit_node.ts.tmp
 
-# ------------------------------------------------------------------
-#  4️⃣  Install nginx (if not already present)
-# ------------------------------------------------------------------
+# -------------------------------------------------------------
+#  4️⃣  Install nginx (if not already there)
+# -------------------------------------------------------------
 if ! command -v nginx >/dev/null 2>&1; then
-  echo "🛠️ Installing nginx ..."
-  sudo apt-get update && sudo apt-get install -y nginx
+    echo "🛠️ Installing nginx ..."
+    sudo apt-get update && sudo apt-get install -y nginx
 fi
 
-# ------------------------------------------------------------------
-#  5️⃣  Generate a self‑signed cert for the IP (no domain needed)
-# ------------------------------------------------------------------
+# -------------------------------------------------------------
+#  5️⃣  Generate a self‑signed cert for the raw IP (no domain needed)
+# -------------------------------------------------------------
 CERT_DIR="/etc/nginx/ssl"
 sudo mkdir -p "$CERT_DIR"
 
@@ -73,9 +70,9 @@ if [[ ! -f "$CERT_DIR/server.crt" || ! -f "$CERT_DIR/server.key" ]]; then
         -out "$CERT_DIR/server.crt"
 fi
 
-# ------------------------------------------------------------------
-#  6️⃣  Configure nginx as a reverse proxy to Deno
-# ------------------------------------------------------------------
+# -------------------------------------------------------------
+#  6️⃣  nginx reverse‑proxy to Deno on port 8443
+# -------------------------------------------------------------
 NGINX_CONF="/etc/nginx/sites-available/exit-node"
 
 sudo tee "$NGINX_CONF" > /dev/null <<EOF
@@ -98,14 +95,14 @@ EOF
 sudo ln -sf "$NGINX_CONF" /etc/nginx/sites-enabled/exit-node
 sudo nginx -t && sudo systemctl reload nginx
 
-# ------------------------------------------------------------------
-#  7️⃣  Create a systemd unit to run Deno
-# ------------------------------------------------------------------
+# -------------------------------------------------------------
+#  7️⃣  Create a systemd unit that runs Deno with the handler
+# -------------------------------------------------------------
 SERVICE="/etc/systemd/system/exit-node.service"
 
 sudo tee "$SERVICE" > /dev/null <<EOF
 [Unit]
-Description=Exit node for mhrv-rs
+Description=MasterHttpRelay exit node (Cloudflare‑bypass)
 After=network.target
 
 [Service]
@@ -125,12 +122,13 @@ EOF
 sudo systemctl daemon-reload
 sudo systemctl enable --now exit-node.service
 
-# ------------------------------------------------------------------
+# -------------------------------------------------------------
 #  8️⃣  Final report
-# ------------------------------------------------------------------
-echo "✅ Done! The exit node is up."
-echo "• HTTPS endpoint: https://$IP/"
-echo "• PSK (copy this – you’ll need it in mhrv‑rs config): $PSK"
+# -------------------------------------------------------------
+echo "✅ Exit node is ready and running."
 echo ""
-echo "If you want to change the PSK later, edit exit_node.ts and restart:"
-echo "  sudo systemctl restart exit-node.service"
+echo "• HTTPS URL: https://$IP/"
+echo "• PSK (copy it to your mhrv‑rs config): $PSK"
+echo ""
+echo "If you ever need to change the PSK, edit /opt/exit-node/exit_node.ts"
+echo "then run: sudo systemctl restart exit-node.service"
