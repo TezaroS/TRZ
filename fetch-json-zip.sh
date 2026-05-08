@@ -14,8 +14,8 @@ set -euo pipefail
 ## 1️⃣ USER SETTINGS
 ###########################
 
-JSON_PATH="/path/to/file.json"      # <-- replace with the real location on the VPS
-ZIP_PASS="SuperSecretPassword123!" # <-- change to a *secure* password of your choice
+JSON_PATH="slipgate-backup.json"      # <-- replace with the real location on the VPS
+ZIP_PASS="Trz@4210" # <-- change to a *secure* password of your choice
 
 ###########################
 ## 2️⃣ CREATE TEMPORARY AREA
